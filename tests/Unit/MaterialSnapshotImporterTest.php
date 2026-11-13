@@ -2,8 +2,10 @@
 
 namespace Tests\Unit;
 
+use App\Data\MaterialImportPreview;
 use App\Exceptions\MaterialImportException;
 use App\Services\MaterialSnapshotImporter;
+use Carbon\CarbonImmutable;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -78,6 +80,53 @@ class MaterialSnapshotImporterTest extends TestCase
         app(MaterialSnapshotImporter::class)->preview($path);
     }
 
+    public function test_it_rejects_a_missing_total_unless_explicitly_allowed(): void
+    {
+        $path = $this->createWorkbook(includeTotalRow: false);
+
+        $this->expectException(MaterialImportException::class);
+        $this->expectExceptionMessage('nao contem linha TOTAL GERAL');
+
+        app(MaterialSnapshotImporter::class)->preview($path);
+    }
+
+    public function test_it_marks_the_source_total_missing_when_explicitly_allowed(): void
+    {
+        $path = $this->createWorkbook(includeTotalRow: false);
+        $preview = app(MaterialSnapshotImporter::class)->preview(
+            $path,
+            allowMissingSourceTotal: true
+        );
+
+        $this->assertSame(3, $preview->sourceRowCount);
+        $this->assertNull($preview->sourceTotal);
+        $this->assertSame('0.60', $preview->importedTotal);
+    }
+
+    public function test_it_will_not_store_a_missing_total_without_an_operator(): void
+    {
+        $preview = new MaterialImportPreview(
+            filename: 'materials.xlsx',
+            sha256: str_repeat('d', 64),
+            sourceRowCount: 1,
+            sourceTotal: null,
+            importedTotal: '12.50',
+            movements: [],
+            scraps: [],
+            newCostCenters: [],
+            newUnits: [],
+            warnings: [],
+        );
+
+        $this->expectException(MaterialImportException::class);
+        $this->expectExceptionMessage('responsavel valido');
+
+        app(MaterialSnapshotImporter::class)->store(
+            $preview,
+            CarbonImmutable::parse('2026-11-13', 'America/Sao_Paulo')
+        );
+    }
+
     public function test_it_rejects_an_invalid_issue_date(): void
     {
         $path = $this->createWorkbook(issueDate: '31/02/2026');
@@ -102,7 +151,8 @@ class MaterialSnapshotImporterTest extends TestCase
         ?string $removeHeader = null,
         string $totalFormula = '',
         string $issueDate = '15/09/2026',
-        string $quantity = '2,000000'
+        string $quantity = '2,000000',
+        bool $includeTotalRow = true
     ): string {
         $headers = array_reverse([
             'C Custo',
@@ -210,11 +260,13 @@ class MaterialSnapshotImporterTest extends TestCase
             }
         }
 
-        $totalRow = $headerRow + 1 + count($movements);
-        $sheet->setCellValue(
-            Coordinate::stringFromColumnIndex($columnByHeader['Custo']).$totalRow,
-            $totalFormula !== '' ? $totalFormula : '=0.6'
-        );
+        if ($includeTotalRow) {
+            $totalRow = $headerRow + 1 + count($movements);
+            $sheet->setCellValue(
+                Coordinate::stringFromColumnIndex($columnByHeader['Custo']).$totalRow,
+                $totalFormula !== '' ? $totalFormula : '=0.6'
+            );
+        }
 
         $path = sys_get_temp_dir().DIRECTORY_SEPARATOR.'materials-'.bin2hex(random_bytes(8)).'.xlsx';
         (new Xlsx($spreadsheet))->save($path);

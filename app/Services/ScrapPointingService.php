@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\UploadSnapshot;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -73,11 +75,74 @@ class ScrapPointingService
         });
     }
 
+    public function assertActivePointingsWithinAvailableArea(int $snapshotId): void
+    {
+        $latestRevision = DB::table('scrap_revisions')
+            ->where('snapshot_id', $snapshotId)
+            ->select([
+                'snapshot_id',
+                'cost_center_code',
+                'work_order',
+                'product_code',
+            ])
+            ->selectRaw('MAX(revision) AS latest_revision')
+            ->groupBy([
+                'snapshot_id',
+                'cost_center_code',
+                'work_order',
+                'product_code',
+            ]);
+
+        $pointings = DB::table('snapshot_scraps as scraps')
+            ->joinSub($latestRevision, 'latest', function (JoinClause $join): void {
+                $join->on('latest.snapshot_id', '=', 'scraps.snapshot_id')
+                    ->on('latest.cost_center_code', '=', 'scraps.cost_center_code')
+                    ->on('latest.work_order', '=', 'scraps.work_order')
+                    ->on('latest.product_code', '=', 'scraps.product_code');
+            })
+            ->join('scrap_revisions as revisions', function (JoinClause $join): void {
+                $join->on('revisions.snapshot_id', '=', 'latest.snapshot_id')
+                    ->on('revisions.cost_center_code', '=', 'latest.cost_center_code')
+                    ->on('revisions.work_order', '=', 'latest.work_order')
+                    ->on('revisions.product_code', '=', 'latest.product_code')
+                    ->on('revisions.revision', '=', 'latest.latest_revision');
+            })
+            ->where('scraps.snapshot_id', $snapshotId)
+            ->where('scraps.is_active', true)
+            ->whereNotNull('revisions.value_m2')
+            ->get([
+                'scraps.snapshot_id',
+                'scraps.cost_center_code',
+                'scraps.work_order',
+                'scraps.product_code',
+                'revisions.value_m2',
+            ]);
+
+        foreach ($pointings as $pointing) {
+            $identity = [
+                'snapshot_id' => (int) $pointing->snapshot_id,
+                'cost_center_code' => $pointing->cost_center_code,
+                'work_order' => $pointing->work_order,
+                'product_code' => $pointing->product_code,
+            ];
+            $availableArea = $this->availableArea($identity);
+
+            if ($this->compareDecimals((string) $pointing->value_m2, $availableArea) > 0) {
+                throw ValidationException::withMessages([
+                    'quantity' => sprintf(
+                        'A correção deixaria o apontamento de %s m² acima da área disponível de %s m². Reduza a sobra antes de corrigir o material.',
+                        $pointing->value_m2,
+                        $availableArea
+                    ),
+                ]);
+            }
+        }
+    }
+
     /**
      * @param  array{snapshot_id: int, cost_center_code: string, work_order: string, product_code: string}  $identity
-     * @return \Illuminate\Database\Query\Builder
      */
-    private function eligibleMovements(array $identity): \Illuminate\Database\Query\Builder
+    private function eligibleMovements(array $identity): Builder
     {
         return $this->movements->forSnapshot($identity['snapshot_id'])
             ->where('cost_center_code', $identity['cost_center_code'])

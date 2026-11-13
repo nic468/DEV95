@@ -12,6 +12,7 @@ class SnapshotMovementCorrectionService
 {
     public function __construct(
         private readonly SnapshotScrapSynchronizer $scraps,
+        private readonly ScrapPointingService $pointings,
         private readonly SnapshotMetricCalculator $metrics
     ) {}
 
@@ -44,6 +45,7 @@ class SnapshotMovementCorrectionService
             ]);
 
             $this->scraps->synchronize((int) $source->snapshot_id);
+            $this->pointings->assertActivePointingsWithinAvailableArea((int) $source->snapshot_id);
             $this->metrics->rebuild((int) $source->snapshot_id);
 
             return $correction;

@@ -4,9 +4,9 @@ namespace Tests\Feature;
 
 use App\Data\MaterialImportPreview;
 use App\Exceptions\MaterialImportException;
+use App\Http\Controllers\SnapshotOriginalFileController;
 use App\Models\UploadSnapshot;
 use App\Services\MaterialSnapshotImporter;
-use App\Http\Controllers\SnapshotOriginalFileController;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -39,18 +39,107 @@ class MaterialSnapshotUploadTest extends TestCase
         $importer = \Mockery::mock(MaterialSnapshotImporter::class);
         $importer->shouldReceive('preview')
             ->once()
-            ->withArgs(fn (string $path, string $filename): bool => is_file($path) && $filename === 'materials.xlsx')
+            ->withArgs(fn (string $path, string $filename, bool $allowMissingTotal): bool => is_file($path)
+                && $filename === 'materials.xlsx'
+                && ! $allowMissingTotal)
             ->andReturn($preview);
         $importer->shouldReceive('store')
             ->once()
-            ->withArgs(function (MaterialImportPreview $actualPreview, $referenceDate, string $path) use (
-                $preview,
-                &$storedPath
-            ): bool {
+            ->withArgs(function (
+                MaterialImportPreview $actualPreview,
+                $referenceDate,
+                string $path,
+                ?string $confirmedBy
+            ) use ($preview, &$storedPath): bool {
                 $storedPath = $path;
 
                 return $actualPreview === $preview
                     && $referenceDate->toDateString() === '2026-11-12'
+                    && str_starts_with($path, 'snapshots/source/')
+                    && str_ends_with($path, '.xlsx')
+                    && $confirmedBy === null;
+            })
+            ->andReturn($snapshot);
+        $this->app->instance(MaterialSnapshotImporter::class, $importer);
+
+        $this->postWithCsrf(route('materials.import'), [
+            'file' => UploadedFile::fake()->createWithContent('materials.xlsx', 'xlsx contents'),
+            'reference_date' => '2026-11-12',
+        ])
+            ->assertRedirect(route('materials.index', ['date' => '2026-11-12']))
+            ->assertSessionHas('status')
+            ->assertSessionHas('import_warnings', function (array $warnings): bool {
+                return count($warnings) === 2;
+            });
+
+        $this->assertIsString($storedPath);
+        Storage::disk('local')->assertExists($storedPath);
+    }
+
+    public function test_a_missing_total_upload_requires_confirmation_and_operator_name(): void
+    {
+        $this->app['env'] = 'local';
+        Storage::fake('local');
+        $importer = \Mockery::mock(MaterialSnapshotImporter::class);
+        $importer->shouldNotReceive('preview');
+        $this->app->instance(MaterialSnapshotImporter::class, $importer);
+
+        $this->from(route('materials.index'))
+            ->postWithCsrf(route('materials.import'), [
+                'file' => UploadedFile::fake()->createWithContent('dev1311.xlsx', 'xlsx contents'),
+                'reference_date' => '2026-11-13',
+                'allow_missing_total' => '1',
+            ])
+            ->assertRedirect(route('materials.index'))
+            ->assertSessionHasErrors('confirmed_by');
+
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_an_explicitly_confirmed_missing_total_upload_is_marked_unreconciled(): void
+    {
+        $this->app['env'] = 'local';
+        Storage::fake('local');
+        $preview = new MaterialImportPreview(
+            filename: 'dev1311.xlsx',
+            sha256: str_repeat('c', 64),
+            sourceRowCount: 2631,
+            sourceTotal: null,
+            importedTotal: '2651471.01',
+            movements: [],
+            scraps: [],
+            newCostCenters: [],
+            newUnits: [],
+            warnings: [],
+        );
+        $snapshot = new UploadSnapshot([
+            'reference_date' => '2026-11-13',
+            'version' => 1,
+            'row_count' => 2631,
+            'imported_total' => '2651471.01',
+            'reconciliation_status' => 'source_total_missing',
+        ]);
+        $storedPath = null;
+        $importer = \Mockery::mock(MaterialSnapshotImporter::class);
+        $importer->shouldReceive('preview')
+            ->once()
+            ->withArgs(fn (string $path, string $filename, bool $allowMissingTotal): bool => is_file($path)
+                && $filename === 'dev1311.xlsx'
+                && $allowMissingTotal)
+            ->andReturn($preview);
+        $importer->shouldReceive('store')
+            ->once()
+            ->withArgs(function (
+                MaterialImportPreview $actualPreview,
+                $referenceDate,
+                string $path,
+                ?string $confirmedBy
+            ) use ($preview, &$storedPath): bool {
+                $storedPath = $path;
+
+                return $actualPreview === $preview
+                    && $referenceDate->toDateString() === '2026-11-13'
+                    && $confirmedBy === 'Operador de teste'
                     && str_starts_with($path, 'snapshots/source/')
                     && str_ends_with($path, '.xlsx');
             })
@@ -58,13 +147,17 @@ class MaterialSnapshotUploadTest extends TestCase
         $this->app->instance(MaterialSnapshotImporter::class, $importer);
 
         $this->postWithCsrf(route('materials.import'), [
-                'file' => UploadedFile::fake()->createWithContent('materials.xlsx', 'xlsx contents'),
-                'reference_date' => '2026-11-12',
-            ])
-            ->assertRedirect(route('materials.index', ['date' => '2026-11-12']))
+            'file' => UploadedFile::fake()->createWithContent('dev1311.xlsx', 'xlsx contents'),
+            'reference_date' => '2026-11-13',
+            'allow_missing_total' => '1',
+            'confirmed_by' => 'Operador de teste',
+        ])
+            ->assertRedirect(route('materials.index', ['date' => '2026-11-13']))
             ->assertSessionHas('status')
             ->assertSessionHas('import_warnings', function (array $warnings): bool {
-                return count($warnings) === 2;
+                return collect($warnings)->contains(
+                    fn (string $warning): bool => str_contains($warning, 'arquivado sem reconciliação')
+                );
             });
 
         $this->assertIsString($storedPath);

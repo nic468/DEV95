@@ -91,6 +91,11 @@ aceitos nem executados. A validacao e a reconciliacao acontecem antes de gravar
 o snapshot; o arquivo original e mantido no disco privado. Snapshots anteriores
 ao upload web podem nao ter o binario original armazenado. O comando CLI
 `materials:import` continua disponivel, incluindo `--dry-run`.
+No upload web, uma planilha sem `TOTAL GERAL` so pode ser arquivada mediante
+marcacao explicita e nome do responsavel. Nesse caso, `source_total` e a
+diferenca de reconciliacao ficam nulos, o estado e `source_total_missing`, e o
+custo das linhas nao e apresentado como reconciliado. A migration que permite
+esse estado nao pode ser revertida enquanto houver snapshots assim registrados.
 Em `APP_ENV=local`, o upload sem login e permitido apenas por loopback. Em
 outros ambientes, a rota exige sessao autenticada; como o sistema ainda nao
 oferece fluxo de login, nao exponha o upload publicamente antes de integrar

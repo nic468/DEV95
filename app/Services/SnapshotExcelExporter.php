@@ -911,10 +911,19 @@ class SnapshotExcelExporter
             ->where('snapshot_movements.snapshot_id', $snapshot->id)
             ->distinct()
             ->count('snapshot_movement_revisions.snapshot_movement_id');
+        $reconciliation = $snapshot->reconciliation_status === 'source_total_missing'
+            ? sprintf(
+                '%d linhas; soma calculada R$ %s; TOTAL GERAL de origem ausente, sem reconciliação. Confirmação: %s em %s.',
+                $snapshot->row_count,
+                $snapshot->imported_total,
+                $snapshot->confirmed_by,
+                $snapshot->confirmed_at?->setTimezone('America/Sao_Paulo')->format('d/m/Y H:i') ?? 'horário indisponível'
+            )
+            : sprintf('%d linhas; custo importado R$ %s.', $snapshot->row_count, $snapshot->imported_total);
         $rows = [
             ['Snapshot', sprintf('%s, versão %d.', $snapshot->reference_date->format('Y-m-d'), $snapshot->version)],
             ['Arquivo de origem', $snapshot->filename],
-            ['Reconciliação', sprintf('%d linhas; custo importado R$ %s.', $snapshot->row_count, $snapshot->imported_total)],
+            ['Reconciliação', $reconciliation],
             ['Correções', sprintf(
                 '%d materiais revisados; a aba Dados usa os valores corrigidos e o registro original permanece preservado.',
                 $correctionCount

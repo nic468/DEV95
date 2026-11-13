@@ -350,6 +350,55 @@ button:focus-visible {
     font-size: .75rem;
 }
 
+.upload-exception {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 9px;
+    margin: 0;
+    border: 1px solid #e8dcc0;
+    border-radius: 9px;
+    background: #fffcf4;
+    padding: 12px;
+}
+
+.upload-exception legend {
+    padding: 0 5px;
+    color: #755a22;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
+.upload-exception-confirm {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: #46596d;
+    font-size: .82rem;
+    line-height: 1.45;
+}
+
+.upload-exception-confirm input {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.upload-exception .upload-field {
+    max-width: 380px;
+}
+
+.reconciliation-status-badge {
+    display: block;
+    width: fit-content;
+    margin-top: 5px;
+    border-radius: 999px;
+    background: #fff3d6;
+    color: #755a22;
+    font-size: .68rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    white-space: normal;
+}
+
 .field-error {
     color: #922f2f;
     font-size: .78rem;

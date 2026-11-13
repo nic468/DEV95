@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Data\MaterialImportPreview;
 use App\Exceptions\MaterialImportException;
-use App\Models\UploadSnapshot;
 use App\Services\MaterialSnapshotImporter;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -26,6 +25,8 @@ class MaterialSnapshotUploadController extends Controller
         $validated = $request->validate([
             'file' => ['required', 'file', 'extensions:xlsx', 'max:'.$maxKilobytes],
             'reference_date' => ['required', 'date_format:Y-m-d'],
+            'allow_missing_total' => ['sometimes', 'accepted'],
+            'confirmed_by' => ['nullable', 'required_if:allow_missing_total,1', 'string', 'max:256'],
         ], [
             'file.required' => 'Selecione uma planilha .xlsx.',
             'file.file' => 'O arquivo enviado não pôde ser lido.',
@@ -33,6 +34,10 @@ class MaterialSnapshotUploadController extends Controller
             'file.max' => 'O arquivo excede o limite de '.$maxKilobytes.' KB.',
             'reference_date.required' => 'Informe a data de referência.',
             'reference_date.date_format' => 'A data de referência deve estar no formato AAAA-MM-DD.',
+            'allow_missing_total.accepted' => 'Confirme explicitamente a importação sem TOTAL GERAL.',
+            'confirmed_by.required_if' => 'Informe quem confirmou a importação sem TOTAL GERAL.',
+            'confirmed_by.string' => 'O nome do responsável deve ser texto.',
+            'confirmed_by.max' => 'O nome do responsável não pode exceder 256 caracteres.',
         ]);
 
         /** @var UploadedFile $uploadedFile */
@@ -46,7 +51,11 @@ class MaterialSnapshotUploadController extends Controller
         }
 
         try {
-            $preview = $importer->preview($temporaryPath, $uploadedFile->getClientOriginalName());
+            $preview = $importer->preview(
+                $temporaryPath,
+                $uploadedFile->getClientOriginalName(),
+                isset($validated['allow_missing_total'])
+            );
         } catch (MaterialImportException $exception) {
             throw ValidationException::withMessages(['file' => $exception->getMessage()]);
         }
@@ -66,7 +75,12 @@ class MaterialSnapshotUploadController extends Controller
                 throw new RuntimeException('Não foi possível arquivar o arquivo original.');
             }
 
-            $snapshot = $importer->store($preview, $referenceDate, $sourceFilePath);
+            $snapshot = $importer->store(
+                $preview,
+                $referenceDate,
+                $sourceFilePath,
+                $validated['confirmed_by'] ?? null
+            );
             $snapshotStored = true;
         } catch (MaterialImportException $exception) {
             throw ValidationException::withMessages(['file' => $exception->getMessage()]);
@@ -98,6 +112,13 @@ class MaterialSnapshotUploadController extends Controller
     private function warnings(MaterialImportPreview $preview): array
     {
         $warnings = $preview->warnings;
+
+        if ($preview->sourceTotal === null) {
+            $warnings[] = sprintf(
+                'TOTAL GERAL ausente: custo das linhas R$ %s. O snapshot foi arquivado sem reconciliação.',
+                number_format((float) $preview->importedTotal, 2, ',', '.')
+            );
+        }
 
         if ($preview->newCostCenters !== []) {
             $warnings[] = 'Novos centros de custo cadastrados: '.implode(', ', $preview->newCostCenters).'.';

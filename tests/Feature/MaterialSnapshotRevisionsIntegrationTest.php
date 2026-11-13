@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\SnapshotMovement;
 use App\Http\Middleware\LocalDashboardAccess;
+use App\Models\SnapshotMovement;
 use App\Services\EffectiveSnapshotMovementQuery;
 use App\Services\MaterialSnapshotImporter;
 use App\Services\ScrapPointingService;
@@ -118,6 +118,34 @@ class MaterialSnapshotRevisionsIntegrationTest extends TestCase
             $pointings = app(ScrapPointingService::class);
             $this->assertSame('2.000000', $pointings->availableArea($identity));
             $this->assertSame(2, $pointings->record($identity, '1.500000', 'Operador de teste'));
+
+            try {
+                app(SnapshotMovementCorrectionService::class)->correct($movement, [
+                    'cost_center_code' => $center,
+                    'work_order' => $workOrder,
+                    'movement_type' => 'RE1',
+                    'product_code' => $newProduct,
+                    'description' => 'CHAPA A CORRIGIDA',
+                    'quantity' => '1.000000',
+                    'unit_code' => 'M2',
+                    'unit_cost' => '7.250000',
+                    'cost' => '14.50',
+                    'document' => 'DOC001',
+                    'issue_date' => '2026-09-15',
+                    'standard_cost' => null,
+                    'standard_total' => '0.000000',
+                ], 'Operador de teste');
+                $this->fail('A correção que reduz a área abaixo da sobra apontada deve ser rejeitada.');
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('quantity', $exception->errors());
+            }
+
+            $this->assertCount(1, $movement->fresh()->revisions);
+            $effective = app(EffectiveSnapshotMovementQuery::class)
+                ->forSnapshot((int) $snapshot->id)
+                ->first();
+            $this->assertNotNull($effective);
+            $this->assertSame('2.000000', $effective->quantity);
 
             try {
                 $pointings->record($identity, '2.000001', 'Operador de teste');

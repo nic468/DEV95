@@ -28,6 +28,11 @@ class MaterialControlMigrationCompilationTest extends TestCase
 
                     return false;
                 }
+
+                public function quote(string $string, int $type = PDO::PARAM_STR): string|false
+                {
+                    return "'".str_replace("'", "''", $string)."'";
+                }
             };
 
             return new MySqlConnection(
@@ -109,5 +114,23 @@ class MaterialControlMigrationCompilationTest extends TestCase
             'drop',
             strtolower(implode("\n", array_column($revisionDown, 'query')))
         );
+
+        $missingTotalMigrationPath = database_path(
+            'migrations/2026_11_13_000002_allow_missing_source_total_for_snapshots.php'
+        );
+        $missingTotalUp = $connection->pretend(function () use ($missingTotalMigrationPath): void {
+            (require $missingTotalMigrationPath)->up();
+        });
+        $missingTotalDown = $connection->pretend(function () use ($missingTotalMigrationPath): void {
+            (require $missingTotalMigrationPath)->down();
+        });
+        $missingTotalUpSql = implode("\n", array_column($missingTotalUp, 'query'));
+        $missingTotalDownSql = implode("\n", array_column($missingTotalDown, 'query'));
+
+        $this->assertStringContainsString('source_total_missing', $missingTotalUpSql);
+        $this->assertStringContainsString('source_total', $missingTotalUpSql);
+        $this->assertStringContainsString('DROP CONSTRAINT', $missingTotalUpSql);
+        $this->assertStringContainsString('source_total_missing', $missingTotalDownSql);
+        $this->assertStringContainsString('MODIFY', strtoupper($missingTotalDownSql));
     }
 }

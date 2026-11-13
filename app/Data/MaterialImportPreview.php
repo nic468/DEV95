@@ -15,7 +15,7 @@ final readonly class MaterialImportPreview
         public string $filename,
         public string $sha256,
         public int $sourceRowCount,
-        public string $sourceTotal,
+        public ?string $sourceTotal,
         public string $importedTotal,
         public array $movements,
         public array $scraps,

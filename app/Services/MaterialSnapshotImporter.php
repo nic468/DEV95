@@ -41,8 +41,11 @@ class MaterialSnapshotImporter
         private readonly SnapshotMetricCalculator $metricCalculator
     ) {}
 
-    public function preview(string $path, ?string $originalFilename = null): MaterialImportPreview
-    {
+    public function preview(
+        string $path,
+        ?string $originalFilename = null,
+        bool $allowMissingSourceTotal = false
+    ): MaterialImportPreview {
         $resolvedPath = realpath($path);
 
         if ($resolvedPath === false || ! is_file($resolvedPath) || ! is_readable($resolvedPath)) {
@@ -153,7 +156,13 @@ class MaterialSnapshotImporter
                 $movements[] = $movement;
             }
 
-            if (count($totalRows) !== 1 || $sourceTotal === null) {
+            if ($totalRows === [] && ! $allowMissingSourceTotal) {
+                throw new MaterialImportException(
+                    'A planilha nao contem linha TOTAL GERAL. Para arquivar sem reconciliacao, confirme essa excecao no formulario.'
+                );
+            }
+
+            if ($totalRows !== [] && (count($totalRows) !== 1 || $sourceTotal === null)) {
                 throw new MaterialImportException(
                     'A planilha deve conter exatamente uma linha de TOTAL GERAL identificavel.'
                 );
@@ -163,7 +172,7 @@ class MaterialSnapshotImporter
                 throw new MaterialImportException('Nenhum lancamento valido foi encontrado.');
             }
 
-            if ($totalRows[0] < max(array_column($movements, 'source_row'))) {
+            if ($totalRows !== [] && $totalRows[0] < max(array_column($movements, 'source_row'))) {
                 throw new MaterialImportException(
                     'A linha de TOTAL GERAL deve vir depois de todos os lancamentos.'
                 );
@@ -175,7 +184,7 @@ class MaterialSnapshotImporter
                 $importedTotal = $this->addMoney($importedTotal, $movement['cost']);
             }
 
-            if ($importedTotal !== $sourceTotal) {
+            if ($sourceTotal !== null && $importedTotal !== $sourceTotal) {
                 throw new MaterialImportException(
                     "Reconciliacao divergente: origem {$sourceTotal}; linhas {$importedTotal}. "
                     .'Nenhum snapshot foi gravado.'
@@ -206,10 +215,26 @@ class MaterialSnapshotImporter
     public function store(
         MaterialImportPreview $preview,
         CarbonImmutable $referenceDate,
-        ?string $sourceFilePath = null
-    ): UploadSnapshot
-    {
-        return DB::transaction(function () use ($preview, $referenceDate, $sourceFilePath): UploadSnapshot {
+        ?string $sourceFilePath = null,
+        ?string $confirmedBy = null
+    ): UploadSnapshot {
+        $confirmedBy = $confirmedBy === null ? null : trim($confirmedBy);
+
+        if (
+            $preview->sourceTotal === null
+            && ($confirmedBy === null || $confirmedBy === '' || mb_strlen($confirmedBy) > 256)
+        ) {
+            throw new MaterialImportException(
+                'Informe um responsavel valido para arquivar sem TOTAL GERAL.'
+            );
+        }
+
+        return DB::transaction(function () use (
+            $preview,
+            $referenceDate,
+            $sourceFilePath,
+            $confirmedBy
+        ): UploadSnapshot {
             $date = $referenceDate->toDateString();
 
             if (UploadSnapshot::query()
@@ -235,8 +260,12 @@ class MaterialSnapshotImporter
                 'row_count' => $preview->sourceRowCount,
                 'source_total' => $preview->sourceTotal,
                 'imported_total' => $preview->importedTotal,
-                'reconciliation_difference' => '0.00',
-                'reconciliation_status' => 'matched',
+                'reconciliation_difference' => $preview->sourceTotal === null ? null : '0.00',
+                'reconciliation_status' => $preview->sourceTotal === null
+                    ? 'source_total_missing'
+                    : 'matched',
+                'confirmed_by' => $preview->sourceTotal === null ? $confirmedBy : null,
+                'confirmed_at' => $preview->sourceTotal === null ? $importedAt : null,
             ]);
 
             $centerNames = config('materials.cost_center_names', []);

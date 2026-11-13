@@ -76,6 +76,38 @@
                 <div class="upload-submit">
                     <button class="button button-primary" type="submit">Validar e importar</button>
                 </div>
+                <fieldset class="upload-exception">
+                    <legend>Exceção de reconciliação</legend>
+                    <label class="upload-exception-confirm">
+                        <input
+                            name="allow_missing_total"
+                            type="checkbox"
+                            value="1"
+                            @checked(old('allow_missing_total') === '1')
+                        >
+                        Confirmo que a planilha não contém TOTAL GERAL e autorizo arquivá-la sem reconciliação.
+                    </label>
+                    @error('allow_missing_total')
+                        <span class="field-error">{{ $message }}</span>
+                    @enderror
+                    <div class="upload-field">
+                        <label for="confirmed-by">Responsável pela confirmação</label>
+                        <input
+                            id="confirmed-by"
+                            name="confirmed_by"
+                            type="text"
+                            maxlength="256"
+                            value="{{ old('confirmed_by') }}"
+                            autocomplete="name"
+                        >
+                        @error('confirmed_by')
+                            <span class="field-error">{{ $message }}</span>
+                        @enderror
+                    </div>
+                    <p class="form-help">
+                        Use somente quando o arquivo realmente não trouxer esse total. A soma calculada será arquivada como não reconciliada.
+                    </p>
+                </fieldset>
             </form>
             <p class="form-help">
                 O snapshot só é gravado após validar a estrutura e reconciliar o custo com o TOTAL GERAL.
@@ -134,7 +166,12 @@
                                 <td>{{ $snapshot->imported_at->setTimezone('America/Sao_Paulo')->format('d/m/Y H:i') }}</td>
                                 <td class="filename-cell" title="{{ $snapshot->filename }}">{{ $snapshot->filename }}</td>
                                 <td>{{ number_format($snapshot->row_count, 0, ',', '.') }}</td>
-                                <td>R$ {{ number_format((float) $snapshot->imported_total, 2, ',', '.') }}</td>
+                                <td>
+                                    R$ {{ number_format((float) $snapshot->imported_total, 2, ',', '.') }}
+                                    @if ($snapshot->reconciliation_status === 'source_total_missing')
+                                        <span class="reconciliation-status-badge">Sem TOTAL GERAL — não reconciliado</span>
+                                    @endif
+                                </td>
                                 <td>
                                     @if ($snapshot->source_file_path)
                                         <a class="text-button"
