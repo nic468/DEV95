@@ -233,3 +233,5 @@ adiciona o dashboard protegido, o M5 adiciona os graficos por UM e o M6
 adiciona a exportacao Excel. O M7 conclui o hardening operacional e a
 documentacao de publicacao; a integracao de autenticacao continua pendente e
 e requisito antes de exposicao publica.
+#   D E V 9 5 _ 1 . 1  
+ 
